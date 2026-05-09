@@ -20,7 +20,11 @@ sources = [
   'src/vswebgpu.cpp',
 ]
 
-wgpu = dependency('wgpu-native', static: true)
+if host_machine.system() == 'windows'
+  wgpu = dependency('wgpu-native-win', static: true)
+else
+  wgpu = dependency('wgpu-native', static: true)
+endif
 
 libs = []
 

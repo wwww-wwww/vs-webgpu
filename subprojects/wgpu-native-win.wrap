@@ -1,0 +1,10 @@
+[wrap-file]
+directory = wgpu-native-win
+source_url = https://github.com/gfx-rs/wgpu-native/releases/download/v29.0.0.0/wgpu-windows-x86_64-msvc-release.zip
+source_filename = wgpu-windows-x86_64-msvc-release.zip
+source_hash = 6ec736b6e7c7259ee5d13cdd06eac4407d1f38539b2e555cbe7040e6098f9dd9
+patch_directory = wgpu-native_overlay
+lead_directory_missing = true
+
+[provide]
+dependency_names = wgpu-native-win
