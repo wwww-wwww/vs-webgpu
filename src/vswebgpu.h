@@ -18,7 +18,7 @@ public:
 struct MapBufferData {
   bool done = false;
   WGPUBuffer buffer;
-  uint8_t *dst;
+  uint16_t *dst;
   uint32_t size;
 };
 
@@ -32,7 +32,7 @@ public:
 
   WGPUComputePipeline pipeline;
 
-  std::vector<uint8_t> data;
+  std::vector<uint16_t> data;
 
   uint32_t width;
   uint32_t height;

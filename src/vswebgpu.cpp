@@ -147,26 +147,18 @@ static const VSFrame *VS_CC compute_get_frame(int n, int activationReason, void 
   if (activationReason == arInitial) {
     vsapi->requestFrameFilter(n, d->node, frameCtx);
   } else if (activationReason == arAllFramesReady) {
-    std::vector<uint8_t> data;
-    data.resize(d->width * d->height * 4);
-    memset(data.data(), 0, data.size() * sizeof(uint8_t));
-
     auto src = vsapi->getFrameFilter(n, d->node, frameCtx);
     for (uint32_t c = 0; c < d->channels; c++) {
       const auto stride = vsapi->getStride(src, c) / d->vi->format.bytesPerSample;
 
-      uint8_t *srcp = (uint8_t *)vsapi->getReadPtr(src, c);
+      uint16_t *srcp = (uint16_t *)vsapi->getReadPtr(src, c);
 
       for (uint32_t y = 0; y < d->height; y++) {
         for (uint32_t x = 0; x < d->width; x++) {
-          data[y * d->width * 4 + x * 4 + c] = srcp[y * stride + x];
+          d->data[y * d->width * 4 + x * 4 + c] = srcp[y * stride + x];
         }
       }
     }
-
-    std::vector<uint8_t> data2;
-    data2.resize(d->width * d->height * 4);
-    memset(data2.data(), 255, data2.size());
 
     WGPUQueue queue = wgpuDeviceGetQueue(d->instance->device);
 
@@ -177,17 +169,17 @@ static const VSFrame *VS_CC compute_get_frame(int n, int activationReason, void 
       WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
       desc.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_StorageBinding | WGPUTextureUsage_CopyDst;
       desc.dimension = WGPUTextureDimension_2D;
-      desc.format = WGPUTextureFormat_RGBA8Unorm;
+      desc.format = WGPUTextureFormat_RGBA16Float;
       desc.size = {d->width, d->height, 1};
 
       texture0 = wgpuDeviceCreateTexture(d->instance->device, &desc);
       WGPUTexelCopyBufferLayout layout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
-      layout.bytesPerRow = 4 * desc.size.width;
+      layout.bytesPerRow = desc.size.width * 4 * sizeof(uint16_t);
       layout.rowsPerImage = desc.size.height;
 
       WGPUTexelCopyTextureInfo dest = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
       dest.texture = texture0;
-      wgpuQueueWriteTexture(queue, &dest, data.data(), data.size(), &layout, &desc.size);
+      wgpuQueueWriteTexture(queue, &dest, d->data.data(), d->data.size() * 2, &layout, &desc.size);
     }
 
     {
@@ -195,17 +187,13 @@ static const VSFrame *VS_CC compute_get_frame(int n, int activationReason, void 
       desc.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_StorageBinding | WGPUTextureUsage_CopyDst |
                    WGPUTextureUsage_CopySrc;
       desc.dimension = WGPUTextureDimension_2D;
-      desc.format = WGPUTextureFormat_RGBA8Unorm;
+      desc.format = WGPUTextureFormat_RGBA16Float;
       desc.size = {d->width, d->height, 1};
 
       texture1 = wgpuDeviceCreateTexture(d->instance->device, &desc);
       WGPUTexelCopyBufferLayout layout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
-      layout.bytesPerRow = 4 * desc.size.width;
+      layout.bytesPerRow = desc.size.width * 4 * sizeof(uint16_t);
       layout.rowsPerImage = desc.size.height;
-
-      WGPUTexelCopyTextureInfo dest = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
-      dest.texture = texture1;
-      wgpuQueueWriteTexture(queue, &dest, data2.data(), data2.size(), &layout, &desc.size);
     }
 
     WGPUCommandEncoderDescriptor command_desc = WGPU_COMMAND_ENCODER_DESCRIPTOR_INIT;
@@ -224,6 +212,7 @@ static const VSFrame *VS_CC compute_get_frame(int n, int activationReason, void 
         desc.dimension = WGPUTextureViewDimension_2D;
         desc.format = desc.format;
         WGPUTextureView textureView = wgpuTextureCreateView(texture0, &desc);
+
         WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
         entry.binding = 0;
         entry.textureView = textureView;
@@ -240,13 +229,54 @@ static const VSFrame *VS_CC compute_get_frame(int n, int activationReason, void 
         desc.dimension = WGPUTextureViewDimension_2D;
         desc.format = desc.format;
         WGPUTextureView textureView = wgpuTextureCreateView(texture1, &desc);
+
         WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
         entry.binding = 1;
         entry.textureView = textureView;
         bindGroupEntries.push_back(entry);
       }
 
-      // TODO: add basic uniforms binding
+      {
+        WGPUSamplerDescriptor samplerDesc = WGPU_SAMPLER_DESCRIPTOR_INIT;
+        samplerDesc.addressModeU = WGPUAddressMode_ClampToEdge;
+        samplerDesc.addressModeV = WGPUAddressMode_ClampToEdge;
+        samplerDesc.addressModeW = WGPUAddressMode_ClampToEdge;
+        samplerDesc.magFilter = WGPUFilterMode_Linear;
+        samplerDesc.minFilter = WGPUFilterMode_Linear;
+        samplerDesc.mipmapFilter = WGPUMipmapFilterMode_Linear;
+        samplerDesc.lodMinClamp = 0.0f;
+        samplerDesc.lodMaxClamp = 1.0f;
+        samplerDesc.compare = WGPUCompareFunction_Undefined;
+        samplerDesc.maxAnisotropy = 1;
+        WGPUSampler sampler = wgpuDeviceCreateSampler(d->instance->device, &samplerDesc);
+
+        WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
+        entry.binding = 2;
+        entry.sampler = sampler;
+        bindGroupEntries.push_back(entry);
+      }
+
+      {
+        WGPUTextureViewDescriptor desc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        desc.aspect = WGPUTextureAspect_All;
+        desc.baseArrayLayer = 0;
+        desc.arrayLayerCount = 1;
+        desc.baseMipLevel = 0;
+        desc.mipLevelCount = 1;
+        desc.dimension = WGPUTextureViewDimension_2D;
+        desc.format = desc.format;
+        WGPUTextureView textureView = wgpuTextureCreateView(texture1, &desc);
+
+        WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
+        entry.binding = 3;
+        entry.buffer = d->uniformBuffer;
+        bindGroupEntries.push_back(entry);
+      }
+
+      {
+        float buf[4] = {n, 0, 0, 0};
+        wgpuQueueWriteBuffer(queue, d->uniformBuffer, 0, buf, 16);
+      }
 
       WGPUBindGroup group;
       {
@@ -271,7 +301,7 @@ static const VSFrame *VS_CC compute_get_frame(int n, int activationReason, void 
     WGPUBuffer buffer;
     {
       WGPUBufferDescriptor desc = WGPU_BUFFER_DESCRIPTOR_INIT;
-      desc.size = d->width * d->height * 4;
+      desc.size = d->width * d->height * 4 * sizeof(uint16_t);
       desc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
       buffer = wgpuDeviceCreateBuffer(d->instance->device, &desc);
 
@@ -281,7 +311,7 @@ static const VSFrame *VS_CC compute_get_frame(int n, int activationReason, void 
       WGPUTexelCopyBufferInfo dest = WGPU_TEXEL_COPY_BUFFER_INFO_INIT;
       dest.buffer = buffer;
       dest.layout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
-      dest.layout.bytesPerRow = 4 * d->width;
+      dest.layout.bytesPerRow = d->width * 4 * sizeof(uint16_t);
       dest.layout.rowsPerImage = d->height;
       WGPUExtent3D size = {d->width, d->height, 1};
       wgpuCommandEncoderCopyTextureToBuffer(encoder, &source, &dest, &size);
@@ -300,14 +330,14 @@ static const VSFrame *VS_CC compute_get_frame(int n, int activationReason, void 
     auto mapdata = std::make_unique<MapBufferData>();
     mapdata->done = false;
     mapdata->buffer = buffer;
-    mapdata->dst = data.data();
-    mapdata->size = data.size();
+    mapdata->dst = d->data.data();
+    mapdata->size = d->data.size() * 2;
     info.userdata1 = mapdata.get();
     info.callback = [](WGPUMapAsyncStatus status, WGPUStringView message, WGPU_NULLABLE void *userdata1,
                        WGPU_NULLABLE void *userdata2) {
       MapBufferData *data = (MapBufferData *)userdata1;
       if (status == WGPUMapAsyncStatus_Success) {
-        const uint8_t *output = (const uint8_t *)wgpuBufferGetConstMappedRange(data->buffer, 0, WGPU_WHOLE_MAP_SIZE);
+        const uint8_t *output = (const uint8_t *)wgpuBufferGetConstMappedRange(data->buffer, 0, data->size);
         memcpy(data->dst, output, data->size);
         wgpuBufferUnmap(data->buffer);
       }
@@ -315,7 +345,7 @@ static const VSFrame *VS_CC compute_get_frame(int n, int activationReason, void 
       *done = true;
     };
 
-    wgpuBufferMapAsync(buffer, WGPUMapMode_Read, 0, d->width * d->height * 4, info);
+    wgpuBufferMapAsync(buffer, WGPUMapMode_Read, 0, mapdata->size, info);
     wgpuInstanceProcessEvents(d->instance->instance);
     while (!mapdata->done) {
       wgpuInstanceProcessEvents(d->instance->instance);
@@ -327,11 +357,11 @@ static const VSFrame *VS_CC compute_get_frame(int n, int activationReason, void 
     constexpr int pl[]{0, 1, 2};
     auto dst = vsapi->newVideoFrame2(&d->vi->format, d->vi->width, d->vi->height, fr, pl, src, core);
     for (uint32_t c = 0; c < d->channels; c++) {
-      auto dstp = vsapi->getWritePtr(dst, c);
+      uint16_t *dstp = (uint16_t *)vsapi->getWritePtr(dst, c);
       const auto stride = vsapi->getStride(dst, c) / d->vi->format.bytesPerSample;
       for (uint32_t y = 0; y < d->height; y++) {
         for (uint32_t x = 0; x < d->width; x++) {
-          dstp[y * stride + x] = data[4 * y * d->width + x * 4 + c];
+          dstp[y * stride + x] = d->data[4 * y * d->width + x * 4 + c];
         }
       }
     }
@@ -354,18 +384,19 @@ static void VS_CC create_compute(const VSMap *in, VSMap *out, [[maybe_unused]] v
   d->vi = vsapi->getVideoInfo(d->node);
 
   if (!vsh::isConstantVideoFormat(d->vi) ||
-      (d->vi->format.sampleType == stInteger && d->vi->format.bitsPerSample != 8)) {
-    throw "Only 32 bit float input supported";
+      (d->vi->format.sampleType == stFloat && d->vi->format.bitsPerSample != 16)) {
+    throw "Only 16 bit float input supported";
   }
 
   d->width = d->vi->width;
   d->height = d->vi->height;
   d->channels = 3;
+  d->data.resize(d->width * d->height * 4);
 
   {
     WGPUBufferDescriptor desc = WGPU_BUFFER_DESCRIPTOR_INIT;
-    desc.size = 4 * sizeof(float);
-    desc.usage = WGPUBufferUsage_Uniform;
+    desc.size = 4 * 4;
+    desc.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
     d->uniformBuffer = wgpuDeviceCreateBuffer(d->instance->device, &desc);
   }
 
@@ -376,7 +407,7 @@ static void VS_CC create_compute(const VSMap *in, VSMap *out, [[maybe_unused]] v
   };
 
   VSFilterDependency deps[]{{d->node, rpStrictSpatial}};
-  vsapi->createVideoFilter(out, "WebGPU", d->vi, compute_get_frame, free, fmParallel, deps, 1, d.get(), core);
+  vsapi->createVideoFilter(out, "WebGPU", d->vi, compute_get_frame, free, fmUnordered, deps, 1, d.get(), core);
   d.release();
 }
 
@@ -436,7 +467,6 @@ static void VS_CC create_pipeline(const VSMap *in, VSMap *out, [[maybe_unused]] 
   WGPUShaderModule shaderModule = wgpuDeviceCreateShaderModule(device, &moduleDesc);
 
   WGPUComputePipelineDescriptor pipelineDesc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
-  pipelineDesc.label = toWgpuStringView("Our simple pipeline");
   pipelineDesc.compute.module = shaderModule;
   WGPUComputePipeline pipeline = wgpuDeviceCreateComputePipeline(device, &pipelineDesc);
 
