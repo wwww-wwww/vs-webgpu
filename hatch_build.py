@@ -38,7 +38,7 @@ class CustomHook(BuildHookInterface[Any]):
         # Setup with vsenv
         # The ``--vsenv`` flag in the Meson setup command activates the Visual Studio environment on Windows,
         # which is required for MSVC-based compilation. On Linux and macOS, this flag is safely ignored.
-        subprocess.run([sys.executable, "-m", "mesonbuild.mesonmain", "setup", "build", "--vsenv"], check=True)
+        subprocess.run([sys.executable, "-m", "mesonbuild.mesonmain", "setup", "build", "--reconfigure", "--vsenv"], check=True)
 
         # Compile
         subprocess.run([sys.executable, "-m", "mesonbuild.mesonmain", "compile", "-C", "build"], check=True)

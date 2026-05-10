@@ -8,13 +8,25 @@
 device = core.webgpu.Device()
 
 shader = """
+struct Uniforms {
+    frame: f32,
+    pad0: f32,
+    pad1: f32,
+    pad2: f32,
+}
+
 @group(0) @binding(0) var inputTex: texture_2d<f32>;
 @group(0) @binding(1) var outputTex: texture_storage_2d<rgba16float, write>;
+@group(0) @binding(2) var samp: sampler;
+@group(0) @binding(3) var<uniform> baseUniforms: Uniforms;
 
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let size = textureDimensions(outputTex);
     if (id.x >= size.x || id.y >= size.y) { return; }
+
+    let _s = samp;
+    let _u = baseUniforms;
 
     let color = textureLoad(inputTex, id.xy, 0);
     textureStore(outputTex, id.xy, color);

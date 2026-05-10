@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <vector>
 
 #include <VSHelper4.h>
@@ -16,23 +17,51 @@ public:
 };
 
 struct MapBufferData {
-  bool done = false;
+  bool done;
   WGPUBuffer buffer;
-  uint16_t *dst;
   uint32_t size;
+  std::function<void(const uint16_t *)> fn_read;
 };
 
-class ComputeData {
+class TextureData {
 public:
+  ~TextureData() {
+    wgpuTextureViewRelease(texture_view);
+    wgpuTextureDestroy(texture);
+  };
+
   VSNode *node;
   const VSVideoInfo *vi;
 
   Instance *instance;
-  WGPUBuffer uniformBuffer;
+
+  uint32_t width;
+  uint32_t height;
+  uint32_t channels;
+
+  std::vector<uint16_t> buffer;
+  WGPUTexture texture;
+  WGPUTextureView texture_view;
+};
+
+class ComputeData {
+public:
+  ~ComputeData() {
+    wgpuComputePipelineRelease(pipeline);
+    wgpuQueueRelease(queue);
+    wgpuSamplerRelease(sampler);
+  };
+
+  VSNode *node;
+  const VSVideoInfo *vi;
+
+  Instance *instance;
 
   WGPUComputePipeline pipeline;
 
-  std::vector<uint16_t> data;
+  WGPUSampler sampler;
+
+  WGPUQueue queue;
 
   uint32_t width;
   uint32_t height;
